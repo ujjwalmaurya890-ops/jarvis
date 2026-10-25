@@ -1,0 +1,23 @@
+# Frontend build and dependencies
+node_modules/
+dist/
+release/
+*.zip
+*.log
+
+# Secrets and Python runtime data
+.env
+.env.*
+!.env.example
+jarvis/data/
+jarvis/logs/
+jarvis/models/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+.venv/
+jarvis/.venv/
+
+# Local scratch
+.verify/
+*.tmp

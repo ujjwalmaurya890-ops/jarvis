@@ -1,0 +1,41 @@
+# JARVIS - local-first voice assistant for Windows 10/11, 8 GB RAM target.
+# Install:  pip install -r requirements.txt
+# Everything below is free / open source. Nothing here needs a paid plan.
+#
+# NOTE: these are the versions this project is written against. Pin the exact
+# versions you actually installed after a successful `pip freeze` on your PC.
+
+# --- GUI -------------------------------------------------------------------
+PySide6==6.7.1                # Qt for Python (LGPL). Only needed for the desktop UI.
+
+# --- Audio capture ---------------------------------------------------------
+sounddevice==0.5.1           # PortAudio bindings; works with the default Windows mic.
+numpy==2.1.3                 # ring buffer + RMS/energy maths. PortAudio is bundled.
+scipy==1.14.1                # band-pass filter for the clap detector.
+
+# --- Speech to text (offline) ---------------------------------------------
+faster-whisper==1.1.0        # CTranslate2 Whisper; use model 'tiny.en' or 'base.en'.
+
+# --- Optional, smaller/faster wake word -----------------------------------
+# openwakeword==0.6.0         # enable if you want a local wake-word model.
+
+# --- Text to speech (offline) ---------------------------------------------
+pyttsx3==2.90                # SAPI5 voices on Windows.
+comtypes==1.2.10             # needed by pyttsx3 on some Python 3.12 installs.
+
+# --- Local LLM -------------------------------------------------------------
+# Ollama itself is installed with its Windows installer, not with pip.
+requests==2.32.3             # talks to http://127.0.0.1:11434 (no heavy SDK needed).
+
+# --- Optional cloud brain (free tier, off by default) ---------------------
+google-genai==1.16.1         # official Google GenAI SDK (replaces google-generativeai).
+httpx==0.27.2                # used by the SDK / our HTTP client.
+
+# --- Web research ----------------------------------------------------------
+ddgs==9.6.0                  # DuckDuckGo HTML search, no API key required.
+beautifulsoup4==4.12.3       # page text extraction.
+playwright==1.48.0           # optional JS rendering:  playwright install chromium
+
+# --- Utilities -------------------------------------------------------------
+python-dotenv==1.0.1         # convenience; config/settings.py also reads .env itself.
+pytest==8.3.3                # dev/test only: pip install pytest

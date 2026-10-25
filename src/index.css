@@ -1,0 +1,221 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Chakra Petch", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --color-ink: #060c15;
+  --color-ink2: #0a1220;
+  --color-panel: #0c1424;
+  --color-panel2: #0f1a2d;
+  --color-line: #16233a;
+  --color-line2: #1f314e;
+  --color-fg: #dbe7ff;
+  --color-mut: #93a4bd;
+  --color-dim: #5c708f;
+  --color-cyan: #22d3ee;
+  --color-sky: #38bdf8;
+  --color-ice: #7dd3fc;
+  --color-lime: #a3e635;
+  --color-amber: #fbbf24;
+  --color-copper: #f97316;
+  --color-rose: #f87171;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* ---------------------------------------------------------------- ambient bg */
+.bg-grid {
+  background-image: linear-gradient(rgba(34, 211, 238, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.055) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 20%, transparent 78%);
+}
+.bg-vignette {
+  background:
+    radial-gradient(80% 55% at 12% 0%, rgba(34, 211, 238, 0.13), transparent 60%),
+    radial-gradient(70% 60% at 92% 8%, rgba(56, 189, 248, 0.1), transparent 62%),
+    radial-gradient(90% 70% at 50% 105%, rgba(163, 230, 53, 0.07), transparent 65%);
+}
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 3px);
+}
+.radar {
+  background: conic-gradient(from 0deg, rgba(34, 211, 238, 0.22), transparent 28%, transparent 100%);
+  animation: sweep 9s linear infinite;
+}
+@keyframes sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------------- effects */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.75s cubic-bezier(0.22, 1, 0.36, 1), transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+.panel {
+  background: linear-gradient(180deg, rgba(15, 26, 45, 0.92), rgba(10, 18, 32, 0.92));
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  position: relative;
+}
+.panel:hover {
+  border-color: var(--color-line2);
+}
+.hair {
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.5), transparent);
+  height: 1px;
+}
+.corner::before,
+.corner::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(34, 211, 238, 0.55);
+}
+.corner::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.corner::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+.pulse-ring {
+  animation: pulse-ring 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.blink {
+  animation: blink 1.15s steps(2, start) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+.typein {
+  animation: typein 0.35s ease-out both;
+}
+@keyframes typein {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.drift {
+  animation: drift 7s ease-in-out infinite;
+}
+@keyframes drift {
+  50% {
+    transform: translateY(-7px);
+  }
+}
+.spin-slow {
+  animation: sweep 22s linear infinite;
+}
+
+/* ---------------------------------------------------------------- code block */
+.code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.62;
+  white-space: pre;
+  tab-size: 4;
+}
+.kw {
+  color: #7dd3fc;
+}
+.str {
+  color: #a3e635;
+}
+.com {
+  color: #4a5f7d;
+  font-style: italic;
+}
+.num {
+  color: #fbbf24;
+}
+.dec {
+  color: #f0abfc;
+}
+
+/* ------------------------------------------------------------------ scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #08101d;
+}
+::-webkit-scrollbar-handle {
+  background: #1d2c46;
+}
+::-webkit-scrollbar-thumb {
+  background: #1d2c46;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b4467;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar,
+  .spin-slow,
+  .drift,
+  .pulse-ring,
+  .blink {
+    animation: none !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
