@@ -1,0 +1,14 @@
+{
+  "name": "word_count",
+  "description": "Counts the words in the given text.",
+  "version": "1.0.0",
+  "capability": "fs.read",
+  "dangerous": false,
+  "schema": {
+    "type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"]
+  },
+  "module": "plugins.example_plugins",
+  "entrypoint": "word_count"
+}

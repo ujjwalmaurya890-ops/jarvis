@@ -29,6 +29,7 @@ class Capability(str, Enum):
     NET_BROWSER = "net.browser"
     APP_LAUNCH = "apps.launch"
     MEDIA_CONTROL = "media.control"
+    PLUGINS = "plugins.run"
     SITE_OPEN = "sites.open"
     FS_READ = "fs.read"
     FS_WRITE = "fs.write"

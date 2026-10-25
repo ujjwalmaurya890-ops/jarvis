@@ -241,6 +241,18 @@ class Jarvis:
         )
         reg = ToolRegistry(self.broker, confirm=self._confirm)
         register_system_tools(reg, ctx)
+
+        # Plugin architecture: load bundled example manifests plus anything the
+        # user dropped into workspace/plugins, then expose plugin tools.
+        from plugins.registry import PluginRegistry
+        from tools.plugin_tools import register_plugin_tools
+
+        plugin_registry = PluginRegistry(self.broker, confirm=self._confirm)
+        plugin_registry.load_folder(Path(__file__).resolve().parent.parent / "plugins")
+        plugin_registry.load_folder(Path(workspace) / "plugins")
+        register_plugin_tools(reg, plugin_registry)
+        self.plugin_registry = plugin_registry
+
         self.registry = reg
         return reg
 
