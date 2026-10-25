@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL,
     chunk INTEGER NOT NULL,
+    page INTEGER,
     text TEXT NOT NULL,
     words INTEGER DEFAULT 0,
     UNIQUE(path, chunk)
@@ -105,7 +106,18 @@ class MemoryDB:
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+            self._migrate()
         self.purge_expired()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release (best-effort)."""
+        try:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(doc_chunks)")}
+            if "page" not in cols:
+                self._conn.execute("ALTER TABLE doc_chunks ADD COLUMN page INTEGER")
+                self._conn.commit()
+        except sqlite3.Error:
+            log.warning("doc_chunks migration skipped", exc_info=True)
 
     # ---- low level ------------------------------------------------------------
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -216,12 +228,13 @@ class MemoryDB:
             )
 
     # ---- document index ---------------------------------------------------------
-    def index_document(self, path: str, chunks: list[str]) -> int:
+    def index_document(self, path: str, chunks: list[str], pages: list[int | None] | None = None) -> int:
         self._exec("DELETE FROM doc_chunks WHERE path=?", (path,))
         for i, chunk in enumerate(chunks[:400]):
+            page = pages[i] if pages and i < len(pages) else None
             self._exec(
-                "INSERT INTO doc_chunks(path,chunk,text,words) VALUES(?,?,?,?)",
-                (path, i, chunk, len(chunk.split())),
+                "INSERT INTO doc_chunks(path,chunk,page,text,words) VALUES(?,?,?,?,?)",
+                (path, i, page, chunk, len(chunk.split())),
             )
         return len(chunks)
 
@@ -234,7 +247,7 @@ class MemoryDB:
 
         params = tuple(f"%{escape_like(t)}%" for t in terms) + (limit,)
         rows = self._query(
-            f"SELECT path, chunk, text, words FROM doc_chunks WHERE {clauses} "
+            f"SELECT path, chunk, page, text, words FROM doc_chunks WHERE {clauses} "
             f"ORDER BY words DESC LIMIT ?",
             params,
         )

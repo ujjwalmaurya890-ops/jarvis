@@ -1,13 +1,15 @@
 """Local document index (optional, off by default).
 
-Deliberately simple: chunk text -> store in SQLite -> rank by term overlap.
-Why not a vector DB? On an 8 GB laptop an embedding model competes with the LLM
-for RAM, and BM25-style ranking is plenty for a personal notes folder. This
-module adds a light cosine-over-term-frequencies on top of SQLite so it stays
-dependency-free.
+Deliberately simple: load text -> chunk per page -> store in SQLite -> rank by
+term overlap.  Why not a vector DB?  On an 8 GB laptop an embedding model
+competes with the LLM for RAM, and BM25-style ranking is plenty for a personal
+notes folder.  This module adds a light cosine-over-term-frequencies on top of
+SQLite so it stays dependency-free.
 
-It NEVER walks the whole disk: only the folders you pass in, only text-like
-files, with a byte budget.
+It NEVER walks the whole disk: only the folders you pass in, only readable
+files, with a byte budget.  Every stored chunk remembers the page it came from
+(PDFs give real page numbers; text files are page 1) so the answer can cite
+"filename (page N)".
 """
 
 from __future__ import annotations
@@ -18,26 +20,23 @@ import re
 import threading
 import time
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
+
+from memory.document_loader import DocumentLoadError, DocumentText, load_document
 
 log = logging.getLogger("jarvis.index")
 
-TEXT_EXT = {".txt", ".md", ".py", ".c", ".h", ".cpp", ".java", ".js", ".ts", ".json", ".csv", ".html", ".css", ".tex", ".log", ".ini", ".yaml", ".yml"}
+# Text extensions we can read directly, plus PDF (handled by pypdf).
+TEXT_EXT = {
+    ".txt", ".md", ".py", ".c", ".h", ".cpp", ".java", ".js", ".ts", ".json",
+    ".csv", ".html", ".css", ".tex", ".log", ".ini", ".yaml", ".yml",
+}
+INDEXABLE_EXT = TEXT_EXT | {".pdf"}
 STOP = set(
     """the a an and or of to in is are was were be been it this that for on with as at by from
     i you he she they we my your our not but if then so can will just about""".split()
 )
 WORD = re.compile(r"[A-Za-z0-9\u0900-\u097F]{3,}")
-
-
-@dataclass
-class DocChunk:
-    path: str
-    start: int
-    text: str
-    terms: Counter
-    norm: float
 
 
 class DocumentIndex:
@@ -50,7 +49,7 @@ class DocumentIndex:
         self.progress = 0.0
         self.scanning = False
 
-    # ---- ingestion ------------------------------------------------------------
+    # ---- ingestion -----------------------------------------------------------
     def iter_files(self, roots: list[str], limit: int = 400) -> list[Path]:
         found: list[Path] = []
         for raw in roots:
@@ -62,7 +61,7 @@ class DocumentIndex:
                 if len(found) >= limit:
                     return found
                 try:
-                    if not path.is_file() or path.suffix.lower() not in TEXT_EXT:
+                    if not path.is_file() or path.suffix.lower() not in INDEXABLE_EXT:
                         continue
                     if path.stat().st_size > self.max_file_bytes or path.stat().st_size < 20:
                         continue
@@ -72,6 +71,46 @@ class DocumentIndex:
                 except OSError:
                     continue
         return found
+
+    def load(self, path: str | Path) -> DocumentText:
+        """Read one file into page-aware text (PDF or plain text)."""
+        return load_document(path, max_file_bytes=self.max_file_bytes)
+
+    def chunk_document(self, doc: DocumentText) -> list[tuple[int | None, str]]:
+        """Split a document into (page_number, chunk_text) pieces.
+
+        Pages are chunked independently so a citation can point at the exact page
+        a passage came from.  Long pages produce several chunks on the same page.
+        """
+        out: list[tuple[int | None, str]] = []
+        step = max(1, int(self.chunk_words * 0.85))
+        for page_no, page_text in enumerate(doc.pages, start=1):
+            words = page_text.split()
+            if not words:
+                continue
+            for start in range(0, len(words), step):
+                piece = " ".join(words[start : start + self.chunk_words]).strip()
+                if piece:
+                    out.append((page_no, piece))
+            if len(out) >= 400:
+                break
+        return out
+
+    def index_file(self, path: str | Path) -> int:
+        """Import one file. Returns the number of chunks stored (0 on skip)."""
+        p = Path(path)
+        doc = self.load(p)
+        pieces = self.chunk_document(doc)
+        if not pieces:
+            return 0
+        pages = [page for page, _ in pieces]
+        self.db.index_document(str(p), [text for _, text in pieces], pages=pages)
+        try:
+            self.last_scan[str(p)] = p.stat().st_mtime
+        except OSError:
+            pass
+        log.info("indexed %s (%d chunks, %d pages)", p.name, len(pieces), doc.page_count)
+        return len(pieces)
 
     def index_roots(self, roots: list[str], *, force: bool = False) -> dict[str, int]:
         """Index changed files. Returns a small report dict."""
@@ -91,13 +130,13 @@ class DocumentIndex:
                     if not force and str(path) in already_indexed and self.last_scan.get(str(path)) == mtime:
                         stats["skipped"] += 1
                         continue
-                    text = path.read_text(encoding="utf-8", errors="ignore")
-                    chunks = self._chunk(text)
-                    if chunks:
-                        stats["chunks"] += self.db.index_document(str(path), chunks)
-                        self.last_scan[str(path)] = mtime
+                    count = self.index_file(path)
+                    if count:
+                        stats["chunks"] += count
                         stats["files"] += 1
-                except (OSError, UnicodeError):
+                    else:
+                        stats["skipped"] += 1
+                except (OSError, UnicodeError, DocumentLoadError):
                     stats["skipped"] += 1
             self.db.set_meta("index_updated", time.time())
         finally:
@@ -106,32 +145,18 @@ class DocumentIndex:
         log.info("index done: %s", stats)
         return stats
 
-    def _chunk(self, text: str) -> list[str]:
-        words = text.split()
-        if not words:
-            return []
-        out = []
-        step = int(self.chunk_words * 0.85) or 1
-        for start in range(0, len(words), step):
-            piece = " ".join(words[start : start + self.chunk_words]).strip()
-            if len(piece) > 80:
-                out.append(piece)
-            if len(out) >= 400:
-                break
-        return out
-
     # ---- retrieval -------------------------------------------------------------
     def search(self, query: str, k: int = 5) -> list[dict[str, object]]:
         rows = self.db.query_docs(query, limit=k * 6)
         if not rows:
             return []
-        q_terms = Counter(WORD.findall((query or "").lower()) - STOP)  # type: ignore[operator]
+        q_terms = Counter(set(WORD.findall((query or "").lower())) - STOP)
         if not q_terms:
             return []
         q_norm = math.sqrt(sum(v * v for v in q_terms.values()))
         scored: list[tuple[float, dict[str, object]]] = []
         for row in rows:
-            d_terms = Counter(WORD.findall(row["text"].lower()) - STOP)  # type: ignore[operator]
+            d_terms = Counter(set(WORD.findall(row["text"].lower())) - STOP)
             d_norm = math.sqrt(sum(v * v for v in d_terms.values())) or 1.0
             overlap = sum(min(d_terms[t], q_terms[t]) for t in q_terms)
             score = overlap / (q_norm * d_norm) if overlap else 0.0
@@ -141,6 +166,7 @@ class DocumentIndex:
                     score,
                     {
                         "path": row["path"],
+                        "page": row.get("page"),
                         "chunk": row["chunk"],
                         "score": round(score, 5),
                         "text": row["text"][:700],
@@ -149,6 +175,17 @@ class DocumentIndex:
             )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in scored[:k]]
+
+    @staticmethod
+    def citation(hit: dict[str, object]) -> str:
+        """Human-readable 'filename (page N)' for a retrieved chunk."""
+        name = Path(str(hit.get("path", "document"))).name
+        page = hit.get("page")
+        return f"{name} (page {page})" if page else name
+
+    def citations(self, hits: list[dict[str, object]]) -> list[dict[str, str]]:
+        return [{"file": Path(str(h.get("path", ""))).name, "path": str(h.get("path", "")),
+                 "page": str(h.get("page") or "")} for h in hits]
 
     def status(self) -> dict[str, object]:
         info = self.db.indexed_paths()

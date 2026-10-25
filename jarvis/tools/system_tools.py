@@ -292,6 +292,70 @@ def register_system_tools(reg: ToolRegistry, ctx: ToolContext) -> None:
         report = ctx.index.index_roots(settings.automation.allowed_dirs, force=bool(force))
         return ToolResult(True, speech=f"Indexed {report.get('files', 0)} files.", display=str(report))
 
+    @reg.tool(
+        "import_document",
+        "Import ONE PDF or text document into the local search index by path.",
+        Capability.FS_READ,
+        {"path": str},
+    )
+    def import_document(path: str) -> ToolResult:
+        if ctx.index is None:
+            return ToolResult.say("The document index is disabled. Turn it on in Settings.")
+        candidate = str(path).strip().strip('\"')
+        decision = reg.broker.check_path(candidate)
+        if not decision.allowed:
+            # A sandbox refusal is a failed action, not a polite reply.
+            return ToolResult.fail(decision.reason)
+        from memory.document_loader import DocumentLoadError
+
+        try:
+            count = ctx.index.index_file(candidate)
+        except DocumentLoadError as exc:
+            return ToolResult.say(str(exc))
+        if not count:
+            return ToolResult.say("That document had no readable text to index.")
+        return ToolResult(
+            True,
+            speech=f"Imported {Path(candidate).name} ({count} chunks).",
+            display=f"Indexed {Path(candidate).name}: {count} chunks.",
+            data={"path": candidate, "chunks": count},
+        )
+
+    @reg.tool(
+        "ask_documents",
+        "Answer a question using your LOCALLY indexed documents and cite the source filename and page.",
+        Capability.FS_READ,
+        {"question": str},
+    )
+    def ask_documents(question: str) -> ToolResult:
+        if ctx.index is None:
+            return ToolResult.say("The document index is disabled. Turn it on in Settings.")
+        from security.input_validation import sanitize_text
+
+        q = sanitize_text(str(question), max_len=400).strip()
+        if not q:
+            return ToolResult.say("Ask me a question about your documents.")
+        hits = ctx.index.search(q, k=5)
+        if not hits:
+            return ToolResult.say("I couldn't find anything relevant in your indexed documents.")
+        citations = ctx.index.citations(hits)
+        blocks = []
+        for i, hit in enumerate(hits, 1):
+            blocks.append(
+                f"[{i}] {ctx.index.citation(hit)}\n<source>\n{hit['text']}\n</source>"
+            )
+        context = "\n\n".join(blocks)
+        sources = [{"title": c["file"], "url": c["path"]} for c in citations]
+        return ToolResult(
+            True,
+            speech="I found relevant passages in your documents.",
+            display="Sources:\n" + "\n".join(
+                f"- {c['file']}" + (f" (page {c['page']})" if c["page"] else "") for c in citations
+            ),
+            sources=sources,
+            data={"text": context, "citations": citations},
+        )
+
     # --------------------------------------------------------------- system --
     @reg.tool("system_stats", "Report RAM, CPU, disk and platform of this machine.", Capability.FS_READ, {})
     def system_stats() -> ToolResult:

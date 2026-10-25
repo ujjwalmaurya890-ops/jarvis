@@ -16,6 +16,9 @@ scipy==1.14.1                # band-pass filter for the clap detector.
 # --- Speech to text (offline) ---------------------------------------------
 faster-whisper==1.1.0        # CTranslate2 Whisper; use model 'tiny.en' or 'base.en'.
 
+# --- Document knowledge base (PDF import) ---------------------------------
+pypdf==4.3.1                 # pure-Python PDF text extraction; free, no network.
+
 # --- Optional, smaller/faster wake word -----------------------------------
 # openwakeword==0.6.0         # enable if you want a local wake-word model.
 
