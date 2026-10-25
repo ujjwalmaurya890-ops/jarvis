@@ -278,6 +278,9 @@ class MainWindow(QMainWindow):
         self.provider_label.setStyleSheet(f"color:{'#7dd3fc' if ok else '#fbbf24'}")
         for warning in components.get("warnings") or []:
             self._append_log("warn", str(warning))
+        summary = report.get("startup_summary")
+        if summary:
+            self._append_log("info", str(summary).replace("\n", " | ")[:200])
         self._append_log("ok", f"boot complete · {len(self.assistant.registry.tools)} tools registered")  # type: ignore[union-attr]
         self.statusBar().showMessage(f"Ready. {len(ok)} AI provider(s). Mic {'running' if report.get('mic') else 'stopped'}.")
 

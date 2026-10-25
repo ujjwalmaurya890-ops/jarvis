@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import time
 from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,25 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
     words INTEGER DEFAULT 0,
     UNIQUE(path, chunk)
 );
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    due REAL NOT NULL,
+    done INTEGER DEFAULT 0,
+    recurring TEXT DEFAULT 'none',
+    created REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(due, done);
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    notes TEXT,
+    due REAL,
+    done INTEGER DEFAULT 0,
+    recurring TEXT DEFAULT 'none',
+    created REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_done ON tasks(done);
 """
 
 SECRET_PATTERNS = [
@@ -262,6 +282,107 @@ class MemoryDB:
     def remove_document(self, path: str) -> int:
         return self._exec("DELETE FROM doc_chunks WHERE path=?", (path,)).rowcount
 
+    # ---- productivity: reminders & tasks ------------------------------------
+    def add_reminder(self, text: str, due: float, recurring: str = "none") -> int:
+        """Store a reminder due at epoch ``due`` (recurring: none/daily/weekly/monthly)."""
+        if recurring not in {"none", "daily", "weekly", "monthly"}:
+            raise ValueError("recurring must be none, daily, weekly or monthly")
+        cur = self._exec(
+            "INSERT INTO reminders(text,due,done,recurring,created) VALUES(?,?,0,?,?)",
+            (redact(strip_control_chars(text))[:300], float(due), recurring, time.time()),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_reminders(self, include_done: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT id,text,due,done,recurring FROM reminders"
+        if not include_done:
+            sql += " WHERE done=0"
+        sql += " ORDER BY due ASC"
+        return [dict(r) for r in self._query(sql)]
+
+    def due_reminders(self, now: float | None = None) -> list[dict[str, Any]]:
+        now = float(now if now is not None else time.time())
+        rows = self._query(
+            "SELECT id,text,due,recurring FROM reminders WHERE done=0 AND due<=? ORDER BY due ASC",
+            (now,),
+        )
+        return [dict(r) for r in rows]
+
+    def complete_reminder(self, reminder_id: int) -> bool:
+        row = self._query("SELECT text,due,recurring FROM reminders WHERE id=?", (reminder_id,))
+        if not row:
+            return False
+        text, due, recurring = row[0]["text"], float(row[0]["due"]), row[0]["recurring"]
+        if recurring in {"daily", "weekly", "monthly"}:
+            # Roll the recurring reminder forward to its next period.
+            self._exec("DELETE FROM reminders WHERE id=?", (reminder_id,))
+            self.add_reminder(text, _next_due(due, recurring), recurring)
+        else:
+            self._exec("UPDATE reminders SET done=1 WHERE id=?", (reminder_id,))
+        return True
+
+    def add_task(self, title: str, notes: str = "", due: float | None = None, recurring: str = "none") -> int:
+        if recurring not in {"none", "daily", "weekly", "monthly"}:
+            raise ValueError("recurring must be none, daily, weekly or monthly")
+        created = time.time()
+        # A recurring task needs a due anchor to roll forward; use creation time.
+        if recurring != "none" and due is None:
+            due = created
+        cur = self._exec(
+            "INSERT INTO tasks(title,notes,due,done,recurring,created) VALUES(?,?,?,0,?,?)",
+            (redact(strip_control_chars(title))[:200], redact(strip_control_chars(notes))[:2000],
+             float(due) if due is not None else None, recurring, created),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_tasks(self, include_done: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT id,title,notes,due,done,recurring FROM tasks"
+        if not include_done:
+            sql += " WHERE done=0"
+        sql += " ORDER BY done ASC, due ASC"
+        return [dict(r) for r in self._query(sql)]
+
+    def complete_task(self, task_id: int) -> bool:
+        row = self._query("SELECT title,due,recurring FROM tasks WHERE id=?", (task_id,))
+        if not row:
+            return False
+        title, due, recurring = row[0]["title"], row[0]["due"], row[0]["recurring"]
+        if recurring in {"daily", "weekly", "monthly"}:
+            # Roll the recurring task forward; one-off tasks are marked done.
+            self._exec("DELETE FROM tasks WHERE id=?", (task_id,))
+            anchor = float(due) if due is not None else time.time()
+            self.add_task(title, due=_next_due(anchor, recurring), recurring=recurring)
+        else:
+            self._exec("UPDATE tasks SET done=1 WHERE id=?", (task_id,))
+        return True
+
+    def task_dashboard(self, now: float | None = None) -> dict[str, Any]:
+        now = float(now if now is not None else time.time())
+        open_tasks = self.list_tasks(include_done=False)
+        done_tasks = [t for t in self.list_tasks(include_done=True) if t["done"]]
+        return {
+            "open_tasks": len(open_tasks),
+            "done_tasks": len(done_tasks),
+            "overdue": [t for t in open_tasks if t.get("due") and t["due"] < now],
+            "due_reminders": self.due_reminders(now),
+            "open_reminders": len(self.list_reminders(include_done=False)),
+            "open": open_tasks,
+        }
+
+    def startup_summary(self, now: float | None = None) -> str:
+        now = float(now if now is not None else time.time())
+        lines: list[str] = []
+        due = self.due_reminders(now)
+        if due:
+            lines.append(f"{len(due)} reminder(s) due now: " + "; ".join(r["text"][:60] for r in due[:3]))
+        open_tasks = self.list_tasks(include_done=False)
+        if open_tasks:
+            lines.append(f"{len(open_tasks)} open task(s): " + "; ".join(t["title"][:40] for t in open_tasks[:3]))
+        recent = self.recent_turns(3)
+        if recent:
+            lines.append("Last conversation: " + " / ".join(r["text"][:40] for r in recent))
+        return "\n".join(lines) if lines else "Nothing pending. Ready when you are."
+
     # ---- retention --------------------------------------------------------------
     def purge_expired(self) -> int:
         if self.retention_days == 0:
@@ -297,3 +418,17 @@ class MemoryDB:
             with suppress(sqlite3.Error):
                 out[table] = int(self._query(f"SELECT COUNT(*) AS c FROM {table}")[0]["c"])  # noqa: S608
         return out
+
+
+def _next_due(due: float, recurring: str) -> float:
+    """Advance a timestamp by one recurring period (daily/weekly/monthly)."""
+    dt = datetime.fromtimestamp(due)
+    if recurring == "daily":
+        return (dt + timedelta(days=1)).timestamp()
+    if recurring == "weekly":
+        return (dt + timedelta(weeks=1)).timestamp()
+    if recurring == "monthly":
+        if dt.month == 12:
+            return dt.replace(year=dt.year + 1, month=1).timestamp()
+        return dt.replace(month=dt.month + 1).timestamp()
+    return due

@@ -206,6 +206,11 @@ class Jarvis:
         report["tts"] = getattr(self.tts, "available", False)
         report["wake"] = getattr(self.wake, "stats", lambda: {})()
         report["clap"] = getattr(self.clap, "stats", lambda: {})()
+        if self.db is not None:
+            try:
+                report["startup_summary"] = self.db.startup_summary()
+            except Exception:  # a summary must never block boot
+                log.debug("startup summary failed", exc_info=True)
         return report
 
     def build_registry(self, browser=None, index=None):  # noqa: ANN001, ANN202

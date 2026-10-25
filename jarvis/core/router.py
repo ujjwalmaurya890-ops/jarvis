@@ -199,6 +199,20 @@ class Router:
         if m and re.search(r"\bmy\b|recall|remember", low):
             return Route("tool", tool="recall_fact", arguments={"key": _clean(m.group(1))}, source="regex", confidence=0.7)
 
+        m = re.search(r"\bremind me to\s+(.+)$", low)
+        if m:
+            return Route("tool", tool="add_reminder", arguments={"text": _clean(m.group(1)), "minutes": 60}, source="regex", confidence=0.9)
+
+        m = re.search(r"\b(?:add|create|make)\s+(?:a\s+)?task\s+(?:that\s+|to\s+)?(.+)$", low)
+        if m:
+            return Route("tool", tool="add_task", arguments={"title": _clean(m.group(1))[:80]}, source="regex", confidence=0.9)
+
+        if re.search(r"\b(?:what are my|show my|list my)\s+tasks\b", low) or low == "task dashboard":
+            return Route("tool", tool="task_dashboard", arguments={}, source="regex", confidence=0.9)
+
+        if re.search(r"\b(?:what are my|show my|list my)\s+reminders\b", low):
+            return Route("tool", tool="list_reminders", arguments={}, source="regex", confidence=0.9)
+
         m = re.search(r"\b(?:how much|whats the|what is the) ?(?:ram|memory|cpu|disk|battery)\b", low)
         if m:
             return Route("tool", tool="system_stats", arguments={}, source="regex", confidence=0.9)

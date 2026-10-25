@@ -285,6 +285,79 @@ def register_system_tools(reg: ToolRegistry, ctx: ToolContext) -> None:
         db.clear_memory()
         return ToolResult(True, speech="Conversation memory cleared. Notes and permission grants were not touched.")
 
+    # ------------------------------------------------------------- productivity
+    @reg.tool(
+        "add_reminder",
+        "Set a reminder that fires in a number of minutes.",
+        Capability.FS_WRITE,
+        {"text": str, "minutes": int, "recurring": str},
+    )
+    def add_reminder(text: str, minutes: int = 60, recurring: str = "none") -> ToolResult:
+        db = mem()
+        if db is None:
+            return ToolResult.say("Memory is not attached.")
+        rec = str(recurring).lower()
+        if rec not in {"none", "daily", "weekly", "monthly"}:
+            rec = "none"
+        mins = max(1, int(minutes))
+        db.add_reminder(str(text)[:200], time.time() + mins * 60, rec)
+        return ToolResult(True, speech=f"Reminder set for {mins} minutes.", data={"text": text})
+
+    @reg.tool("list_reminders", "List pending reminders.", Capability.FS_READ, {"include_done": bool})
+    def list_reminders(include_done: bool = False) -> ToolResult:
+        db = mem()
+        if db is None:
+            return ToolResult.say("Memory is not attached.")
+        rows = db.list_reminders(include_done=bool(include_done))
+        if not rows:
+            return ToolResult.say("No reminders.")
+        lines = []
+        for r in rows:
+            label = time.strftime("%H:%M", time.localtime(r["due"]))
+            suffix = f" ({r['recurring']})" if r["recurring"] != "none" else ""
+            lines.append(f"- {r['text']} @ {label}{suffix}")
+        return ToolResult(True, speech=f"You have {len(rows)} reminder(s).", display="\n".join(lines))
+
+    @reg.tool(
+        "add_task",
+        "Add a task to your dashboard.",
+        Capability.FS_WRITE,
+        {"title": str, "notes": str, "recurring": str},
+    )
+    def add_task(title: str, notes: str = "", recurring: str = "none") -> ToolResult:
+        db = mem()
+        if db is None:
+            return ToolResult.say("Memory is not attached.")
+        rec = str(recurring).lower()
+        if rec not in {"none", "daily", "weekly", "monthly"}:
+            rec = "none"
+        db.add_task(str(title)[:120], str(notes)[:2000], recurring=rec)
+        return ToolResult(True, speech=f"Task added: {title}.", data={"title": title})
+
+    @reg.tool("list_tasks", "List your open tasks.", Capability.FS_READ, {"include_done": bool})
+    def list_tasks(include_done: bool = False) -> ToolResult:
+        db = mem()
+        if db is None:
+            return ToolResult.say("Memory is not attached.")
+        rows = db.list_tasks(include_done=bool(include_done))
+        if not rows:
+            return ToolResult.say("No tasks.")
+        lines = [f"- {t['title']}" for t in rows]
+        return ToolResult(True, speech=f"You have {len(rows)} task(s).", display="\n".join(lines))
+
+    @reg.tool("task_dashboard", "Show a summary of your tasks and due reminders.", Capability.FS_READ, {})
+    def task_dashboard() -> ToolResult:
+        db = mem()
+        if db is None:
+            return ToolResult.say("Memory is not attached.")
+        dash = db.task_dashboard()
+        lines = [f"Open tasks: {dash['open_tasks']}  Done: {dash['done_tasks']}  Overdue: {len(dash['overdue'])}"]
+        for t in dash["open"][:10]:
+            lines.append(f"- {t['title']}")
+        for r in dash["due_reminders"][:5]:
+            lines.append(f"- REMINDER: {r['text']}")
+        return ToolResult(True, speech=f"{dash['open_tasks']} open tasks.", display="\n".join(lines), data=dash)
+
     @reg.tool("index_documents", "Re-scan the allowed folders into the local search index (opt-in).", Capability.FS_WRITE, {"force": bool})
     def index_documents(force: bool = False) -> ToolResult:
         if ctx.index is None:
