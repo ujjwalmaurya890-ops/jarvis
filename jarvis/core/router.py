@@ -213,6 +213,17 @@ class Router:
         if re.search(r"\b(?:what are my|show my|list my)\s+reminders\b", low):
             return Route("tool", tool="list_reminders", arguments={}, source="regex", confidence=0.9)
 
+        if re.search(r"\b(?:pause|play)\s+(?:the\s+)?(?:music|media|playback|song)\b", low):
+            return Route("tool", tool="control_media", arguments={"action": "play_pause"}, source="regex", confidence=0.85)
+        if re.search(r"\bnext\s+track\b", low):
+            return Route("tool", tool="control_media", arguments={"action": "next"}, source="regex", confidence=0.85)
+        if re.search(r"\b(?:previous|prev)\s+track\b", low):
+            return Route("tool", tool="control_media", arguments={"action": "previous"}, source="regex", confidence=0.85)
+
+        m = re.search(r"\bdelete\s+(?:the\s+)?file\s+(?:called\s+|named\s+)?(.+)$", low)
+        if m:
+            return Route("tool", tool="delete_file", arguments={"path": _clean(m.group(1))}, source="regex", confidence=0.85, needs_confirmation=True)
+
         m = re.search(r"\b(?:how much|whats the|what is the) ?(?:ram|memory|cpu|disk|battery)\b", low)
         if m:
             return Route("tool", tool="system_stats", arguments={}, source="regex", confidence=0.9)

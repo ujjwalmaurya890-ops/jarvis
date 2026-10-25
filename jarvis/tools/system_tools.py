@@ -479,6 +479,38 @@ def register_system_tools(reg: ToolRegistry, ctx: ToolContext) -> None:
         return ToolResult(True, speech="Shutdown cancelled.")
 
     @reg.tool(
+        "control_media",
+        "Press a media key: play_pause, next, previous or stop.",
+        Capability.MEDIA_CONTROL,
+        {"action": str},
+    )
+    def control_media(action: str) -> ToolResult:
+        from tools.media_control import media_action
+
+        result = media_action(str(action))
+        if not result.ok:
+            return ToolResult.fail(result.message)
+        return ToolResult(True, speech=result.message, display=result.message, data={"action": result.action})
+
+    @reg.tool(
+        "delete_file",
+        "Move a file to the recycle folder, or delete it permanently with confirmation.",
+        Capability.FS_WRITE,
+        {"path": str, "permanent": bool},
+        dangerous=True,
+    )
+    def delete_file(path: str, permanent: bool = False) -> ToolResult:
+        from tools.file_manager import PathError
+
+        try:
+            target = files.delete(str(path), permanent=bool(permanent))
+        except PathError as exc:
+            return ToolResult.fail(str(exc))
+        if permanent:
+            return ToolResult(True, speech="File deleted.", display=f"Deleted {target}")
+        return ToolResult(True, speech="Moved to the recycle folder.", display=f"Moved {target} to the recycle folder.")
+
+    @reg.tool(
         "run_command",
         "Run ONE command the user typed into the allow-list in Settings, referenced by its name.",
         Capability.RUN_COMMAND,

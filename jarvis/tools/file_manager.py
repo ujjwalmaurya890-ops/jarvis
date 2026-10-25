@@ -14,6 +14,8 @@ from __future__ import annotations
 import fnmatch
 import itertools
 import logging
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +49,9 @@ class FileManager:
         if self.workspace not in self.roots:
             self.roots.append(self.workspace)
         self.max_bytes = max_bytes
+        # Soft-delete destination: files moved here can still be recovered.
+        self.trash = self.workspace / ".trash"
+        self.trash.mkdir(parents=True, exist_ok=True)
 
     # ---- checks ---------------------------------------------------------------
     def _resolve(self, raw: str | Path, *, for_write: bool = False) -> Path:
@@ -118,6 +123,25 @@ class FileManager:
             handle.write(content)
         log.info("wrote %s (%d chars)", path, len(content))
         return path
+
+    def delete(self, raw: str | Path, *, permanent: bool = False) -> Path:
+        """Delete a file. Default is a soft delete to ``.trash``.
+
+        Directories are never deleted. The path must resolve inside an allowed
+        read root; the permission broker still asks for confirmation before this
+        runs because the capability is marked dangerous.
+        """
+        path = self._resolve(raw)
+        if path.is_dir():
+            raise PathError("Refusing to delete a directory.")
+        if permanent:
+            path.unlink()
+            log.info("permanently deleted %s", path)
+            return path
+        target = self.trash / f"{path.stem}.{int(time.time())}{path.suffix}"
+        shutil.move(str(path), str(target))
+        log.info("moved %s to trash", path)
+        return target
 
     def search(self, pattern: str, *, roots: list[str] | None = None, limit: int = 40, recursive: bool = True) -> list[FileHit]:
         """Filename glob search restricted to the allowed roots (never the disk)."""
