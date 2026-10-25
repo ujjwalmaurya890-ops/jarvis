@@ -91,6 +91,28 @@ function Orb({ status, level, bars, active }: { status: Status; level: number; b
   );
 }
 
+/* --------------------------------------------------------------- legend */
+function StateLegend({ status }: { status: Status }) {
+  return (
+    <div className="w-full flex flex-wrap gap-1.5">
+      {(Object.keys(TONE) as Status[]).map((s) => (
+        <span
+          key={s}
+          className={`px-1.5 py-[2px] rounded border font-mono text-[9px] tracking-wider ${
+            status === s ? "border-ice/60 text-fg bg-white/[0.04]" : "border-line2 text-dim"
+          }`}
+          title={TONE[s].note}
+        >
+          <span className="mr-1" style={{ color: TONE[s].color }}>
+            ●
+          </span>
+          {TONE[s].label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- sub-widgets */
 function Slider({
   label,
@@ -278,6 +300,7 @@ export default function Console({ j, backend }: { j: JarvisApi; backend: Backend
             TTS <b className={j.support.tts ? "text-lime" : "text-rose"}>{j.support.tts ? "ready" : "none"}</b>
           </span>
         </div>
+        <StateLegend status={j.status} />
       </div>
 
       {/* --------------------------------------------------- right: transcript */}

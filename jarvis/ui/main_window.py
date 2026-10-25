@@ -38,28 +38,8 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import Settings
+from ui.states import STATE_COLOR, STATE_LABEL, is_active_state
 from ui.visualizer import VoiceOrb
-
-STATE_COLOR = {
-    "offline": "#5b6b80",
-    "idle": "#38bdf8",
-    "listening": "#22d3ee",
-    "transcribing": "#a3e635",
-    "thinking": "#fbbf24",
-    "executing": "#f97316",
-    "speaking": "#60a5fa",
-    "error": "#f87171",
-}
-STATE_LABEL = {
-    "offline": "OFFLINE",
-    "idle": "STANDBY",
-    "listening": "LISTENING",
-    "transcribing": "TRANSCRIBING",
-    "thinking": "THINKING",
-    "executing": "EXECUTING",
-    "speaking": "SPEAKING",
-    "error": "ERROR",
-}
 
 
 class BootWorker(QThread):
@@ -245,7 +225,7 @@ class MainWindow(QMainWindow):
         )
         self.orb.set_state(state, color)
         self.status_line.setText(detail or label.lower())
-        self.orb.set_active(state in {"listening", "thinking", "speaking", "transcribing", "executing"})
+        self.orb.set_active(is_active_state(state))
         running = bool(self.assistant and self.assistant.mic and self.assistant.mic.is_running)
         self.start_btn.setText("STOP EAR" if running else "START EAR")
         self.mic_label.setText("mic: live" if running else "mic: off")

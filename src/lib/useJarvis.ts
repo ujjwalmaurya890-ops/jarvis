@@ -576,6 +576,8 @@ export function useJarvis(): JarvisApi {
           if (earOnRef.current) setTimeout(startWake, 200);
           return;
         }
+        setStatus("transcribing");
+        setDetail("decoding audio");
         runCommand(text, "voice");
         if (earOnRef.current) setTimeout(startWake, 400);
       };
