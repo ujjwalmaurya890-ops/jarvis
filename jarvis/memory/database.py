@@ -225,6 +225,11 @@ class MemoryDB:
         )
         return [dict(r) for r in rows]
 
+    def delete_turn(self, turn_id: int) -> bool:
+        """Delete a single turn by id (inspect/delete memory control)."""
+        cur = self._exec("DELETE FROM turns WHERE id=?", (int(turn_id),))
+        return cur.rowcount > 0
+
     # ---- summaries --------------------------------------------------------------
     def add_summary(self, session: str, text: str) -> None:
         self._exec(

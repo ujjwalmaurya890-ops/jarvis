@@ -253,6 +253,10 @@ class Jarvis:
         register_plugin_tools(reg, plugin_registry)
         self.plugin_registry = plugin_registry
 
+        from tools.memory_tools import register_memory_tools
+
+        register_memory_tools(reg, ctx)
+
         self.registry = reg
         return reg
 
