@@ -1,0 +1,51 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime data (may contain personal text)
+data/
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/config.json
+data/api-token
+data/workspace/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Model weights (big)
+*.bin
+*.onnx
+*.tflite
+*.gguf
+models/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

@@ -1,0 +1,439 @@
+"""SQLite memory: preferences, transcripts, summaries, permissions.
+
+Single file at data/jarvis.db.  Rules enforced in code:
+* no passwords / API keys / tokens - a redaction pass runs on every write;
+* transcripts expire after `retention_days` (0 = keep only the current session);
+* `clear_*` methods are the implementation behind "forget my memory";
+* WAL is disabled so the DB never holds a lock the UI can't break.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sqlite3
+import threading
+import time
+from contextlib import suppress
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from security.input_validation import escape_like, strip_control_chars
+
+log = logging.getLogger("jarvis.db")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session TEXT NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    ts REAL NOT NULL,
+    provider TEXT,
+    tokens INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_turns_ts ON turns(ts DESC);
+CREATE TABLE IF NOT EXISTS summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session TEXT NOT NULL,
+    day TEXT NOT NULL,
+    text TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS permissions (
+    capability TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    granted REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    value TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS doc_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    chunk INTEGER NOT NULL,
+    page INTEGER,
+    text TEXT NOT NULL,
+    words INTEGER DEFAULT 0,
+    UNIQUE(path, chunk)
+);
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    due REAL NOT NULL,
+    done INTEGER DEFAULT 0,
+    recurring TEXT DEFAULT 'none',
+    created REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(due, done);
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    notes TEXT,
+    due REAL,
+    done INTEGER DEFAULT 0,
+    recurring TEXT DEFAULT 'none',
+    created REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_done ON tasks(done);
+"""
+
+SECRET_PATTERNS = [
+    re.compile(r"(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer)\b(?:\s+(?:is|for|to))?\s*[:=]?\s*[A-Za-z0-9_\-\.]{8,}"),
+    re.compile(r"(?i)\bsecret\s+token\b\s*[:=]?\s*[^\s,.;]+"),
+    # "password is X", "pin: 1234", "pwd = X" ... dictated secrets are common.
+    re.compile(r"(?i)\b(?:password|passwort|passwd|pwd|pin|otp|secret|token)\b(?:\s+(?:is|for|to))?\s*[:=]?\s*[^\s,.;]+"),
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}\b"),                       # Google-style keys
+    re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{16,}\b"),               # OpenAI-style keys
+    re.compile(r"(?<!\d)(?:\d[ \-]?){13,19}(?!\d)"),                  # card-ish numbers
+]
+EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+
+
+def redact(text: str, *, emails: bool = True) -> str:
+    """Best-effort removal of obvious credentials before anything is stored.
+
+    Deliberately replaces the whole match (not a suffix) so nothing sensitive
+    survives, and leaves the sentence readable enough to be useful. This is a
+    safety net, not encryption: the DB is plain SQLite in your user folder.
+    """
+    out = (text or "").replace("\x00", "")
+    for rx in SECRET_PATTERNS:
+        out = rx.sub("[redacted]", out)
+    if emails:
+        out = EMAIL_PATTERN.sub("[redacted-email]", out)
+    return out
+
+
+class MemoryDB:
+    def __init__(self, path: str | Path, retention_days: int = 30) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.retention_days = retention_days
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=5.0)
+        self._conn.row_factory = sqlite3.Row
+        with self._lock:
+            self._conn.executescript(SCHEMA)
+            self._conn.commit()
+            self._migrate()
+        self.purge_expired()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release (best-effort)."""
+        try:
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(doc_chunks)")}
+            if "page" not in cols:
+                self._conn.execute("ALTER TABLE doc_chunks ADD COLUMN page INTEGER")
+                self._conn.commit()
+        except sqlite3.Error:
+            log.warning("doc_chunks migration skipped", exc_info=True)
+
+    # ---- low level ------------------------------------------------------------
+    def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self._conn.execute(sql, params)
+            self._conn.commit()
+            return cur
+
+    def _query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return list(self._conn.execute(sql, params).fetchall())
+
+    def close(self) -> None:
+        with suppress(Exception):
+            self._conn.close()
+
+    # ---- meta / facts -----------------------------------------------------------
+    def set_meta(self, key: str, value: Any) -> None:
+        self._exec(
+            "INSERT INTO meta(key,value,updated) VALUES(?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated=excluded.updated",
+            (key, json.dumps(value)[:20000], time.time()),
+        )
+
+    def get_meta(self, key: str, default: Any = None) -> Any:
+        rows = self._query("SELECT value FROM meta WHERE key=?", (key,))
+        if not rows:
+            return default
+        try:
+            return json.loads(rows[0]["value"])
+        except (ValueError, TypeError):
+            return default
+
+    def remember(self, key: str, value: str) -> None:
+        self._exec(
+            "INSERT INTO facts(key,value,ts) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, ts=excluded.ts",
+            (redact(strip_control_chars(key))[:120], redact(strip_control_chars(value))[:2000], time.time()),
+        )
+
+    def recall(self, key: str) -> str | None:
+        rows = self._query("SELECT value FROM facts WHERE key=?", (key,))
+        return rows[0]["value"] if rows else None
+
+    def all_facts(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._query("SELECT key,value,ts FROM facts ORDER BY ts DESC LIMIT 200")]
+
+    def forget_fact(self, key: str) -> int:
+        return self._exec("DELETE FROM facts WHERE key LIKE ?", (f"%{key}%",)).rowcount
+
+    # ---- conversation ---------------------------------------------------------
+    def add_turn(self, session: str, role: str, text: str, provider: str = "", tokens: int = 0) -> int:
+        if self.retention_days == 0:
+            return 0  # disabled persistence; the in-process transcript is in StateMachine
+        from security.input_validation import strip_control_chars
+
+        cur = self._exec(
+            "INSERT INTO turns(session,role,text,ts,provider,tokens) VALUES(?,?,?,?,?,?)",
+            (session, role, redact(strip_control_chars(text))[:8000], time.time(), provider, tokens),
+        )
+        return int(cur.lastrowid or 0)
+
+    def recent_turns(self, limit: int = 12, session: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT role,text,ts,provider FROM turns"
+        params: tuple = ()
+        if session:
+            sql += " WHERE session=?"
+            params = (session,)
+        sql += " ORDER BY id DESC LIMIT ?"
+        rows = self._query(sql, (*params, limit))
+        return [dict(r) for r in reversed(rows)]
+
+    def context_messages(self, limit: int = 8) -> list[dict[str, str]]:
+        out = []
+        for row in self.recent_turns(limit):
+            role = "assistant" if row["role"] in ("jarvis", "assistant") else "user"
+            out.append({"role": role, "content": row["text"]})
+        return out
+
+    def search_turns(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        from security.input_validation import escape_like
+
+        rows = self._query(
+            "SELECT role,text,ts FROM turns WHERE text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
+            (f"%{escape_like(query)}%", limit),
+        )
+        return [dict(r) for r in rows]
+
+    def delete_turn(self, turn_id: int) -> bool:
+        """Delete a single turn by id (inspect/delete memory control)."""
+        cur = self._exec("DELETE FROM turns WHERE id=?", (int(turn_id),))
+        return cur.rowcount > 0
+
+    # ---- summaries --------------------------------------------------------------
+    def add_summary(self, session: str, text: str) -> None:
+        self._exec(
+            "INSERT INTO summaries(session,day,text,ts) VALUES(?,?,?,?)",
+            (session, time.strftime("%Y-%m-%d"), redact(strip_control_chars(text))[:4000], time.time()),
+        )
+
+    def summaries(self, limit: int = 30) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._query("SELECT day,text,ts FROM summaries ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ---- permissions ------------------------------------------------------------
+    def get_permissions(self) -> list[tuple[str, str]]:
+        return [(r["capability"], r["scope"]) for r in self._query("SELECT capability,scope FROM permissions")]
+
+    def save_permissions(self, mapping: dict[str, str]) -> None:
+        with self._lock, self._conn:  # a failure must not erase all grants halfway
+            self._conn.execute("DELETE FROM permissions")
+            self._conn.executemany(
+                "INSERT INTO permissions(capability,scope,granted) VALUES(?,?,?)",
+                [(cap, scope, time.time()) for cap, scope in mapping.items() if scope == "permanent"],
+            )
+
+    # ---- document index ---------------------------------------------------------
+    def index_document(self, path: str, chunks: list[str], pages: list[int | None] | None = None) -> int:
+        self._exec("DELETE FROM doc_chunks WHERE path=?", (path,))
+        for i, chunk in enumerate(chunks[:400]):
+            page = pages[i] if pages and i < len(pages) else None
+            self._exec(
+                "INSERT INTO doc_chunks(path,chunk,page,text,words) VALUES(?,?,?,?,?)",
+                (path, i, page, chunk, len(chunk.split())),
+            )
+        return len(chunks)
+
+    def query_docs(self, query: str, limit: int = 6) -> list[dict[str, Any]]:
+        terms = [t for t in re.findall(r"[A-Za-z0-9\u0900-\u097F]{3,}", (query or "").lower())][:8]
+        if not terms:
+            return []
+        clauses = " OR ".join(["text LIKE ? ESCAPE '\\'"] * len(terms))
+        from security.input_validation import escape_like
+
+        params = tuple(f"%{escape_like(t)}%" for t in terms) + (limit,)
+        rows = self._query(
+            f"SELECT path, chunk, page, text, words FROM doc_chunks WHERE {clauses} "
+            f"ORDER BY words DESC LIMIT ?",
+            params,
+        )
+        return [dict(r) for r in rows]
+
+    def indexed_paths(self) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self._query("SELECT path, COUNT(*) AS chunks, SUM(words) AS words FROM doc_chunks GROUP BY path ORDER BY words DESC")
+        ]
+
+    def remove_document(self, path: str) -> int:
+        return self._exec("DELETE FROM doc_chunks WHERE path=?", (path,)).rowcount
+
+    # ---- productivity: reminders & tasks ------------------------------------
+    def add_reminder(self, text: str, due: float, recurring: str = "none") -> int:
+        """Store a reminder due at epoch ``due`` (recurring: none/daily/weekly/monthly)."""
+        if recurring not in {"none", "daily", "weekly", "monthly"}:
+            raise ValueError("recurring must be none, daily, weekly or monthly")
+        cur = self._exec(
+            "INSERT INTO reminders(text,due,done,recurring,created) VALUES(?,?,0,?,?)",
+            (redact(strip_control_chars(text))[:300], float(due), recurring, time.time()),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_reminders(self, include_done: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT id,text,due,done,recurring FROM reminders"
+        if not include_done:
+            sql += " WHERE done=0"
+        sql += " ORDER BY due ASC"
+        return [dict(r) for r in self._query(sql)]
+
+    def due_reminders(self, now: float | None = None) -> list[dict[str, Any]]:
+        now = float(now if now is not None else time.time())
+        rows = self._query(
+            "SELECT id,text,due,recurring FROM reminders WHERE done=0 AND due<=? ORDER BY due ASC",
+            (now,),
+        )
+        return [dict(r) for r in rows]
+
+    def complete_reminder(self, reminder_id: int) -> bool:
+        row = self._query("SELECT text,due,recurring FROM reminders WHERE id=?", (reminder_id,))
+        if not row:
+            return False
+        text, due, recurring = row[0]["text"], float(row[0]["due"]), row[0]["recurring"]
+        if recurring in {"daily", "weekly", "monthly"}:
+            # Roll the recurring reminder forward to its next period.
+            self._exec("DELETE FROM reminders WHERE id=?", (reminder_id,))
+            self.add_reminder(text, _next_due(due, recurring), recurring)
+        else:
+            self._exec("UPDATE reminders SET done=1 WHERE id=?", (reminder_id,))
+        return True
+
+    def add_task(self, title: str, notes: str = "", due: float | None = None, recurring: str = "none") -> int:
+        if recurring not in {"none", "daily", "weekly", "monthly"}:
+            raise ValueError("recurring must be none, daily, weekly or monthly")
+        created = time.time()
+        # A recurring task needs a due anchor to roll forward; use creation time.
+        if recurring != "none" and due is None:
+            due = created
+        cur = self._exec(
+            "INSERT INTO tasks(title,notes,due,done,recurring,created) VALUES(?,?,?,0,?,?)",
+            (redact(strip_control_chars(title))[:200], redact(strip_control_chars(notes))[:2000],
+             float(due) if due is not None else None, recurring, created),
+        )
+        return int(cur.lastrowid or 0)
+
+    def list_tasks(self, include_done: bool = False) -> list[dict[str, Any]]:
+        sql = "SELECT id,title,notes,due,done,recurring FROM tasks"
+        if not include_done:
+            sql += " WHERE done=0"
+        sql += " ORDER BY done ASC, due ASC"
+        return [dict(r) for r in self._query(sql)]
+
+    def complete_task(self, task_id: int) -> bool:
+        row = self._query("SELECT title,due,recurring FROM tasks WHERE id=?", (task_id,))
+        if not row:
+            return False
+        title, due, recurring = row[0]["title"], row[0]["due"], row[0]["recurring"]
+        if recurring in {"daily", "weekly", "monthly"}:
+            # Roll the recurring task forward; one-off tasks are marked done.
+            self._exec("DELETE FROM tasks WHERE id=?", (task_id,))
+            anchor = float(due) if due is not None else time.time()
+            self.add_task(title, due=_next_due(anchor, recurring), recurring=recurring)
+        else:
+            self._exec("UPDATE tasks SET done=1 WHERE id=?", (task_id,))
+        return True
+
+    def task_dashboard(self, now: float | None = None) -> dict[str, Any]:
+        now = float(now if now is not None else time.time())
+        open_tasks = self.list_tasks(include_done=False)
+        done_tasks = [t for t in self.list_tasks(include_done=True) if t["done"]]
+        return {
+            "open_tasks": len(open_tasks),
+            "done_tasks": len(done_tasks),
+            "overdue": [t for t in open_tasks if t.get("due") and t["due"] < now],
+            "due_reminders": self.due_reminders(now),
+            "open_reminders": len(self.list_reminders(include_done=False)),
+            "open": open_tasks,
+        }
+
+    def startup_summary(self, now: float | None = None) -> str:
+        now = float(now if now is not None else time.time())
+        lines: list[str] = []
+        due = self.due_reminders(now)
+        if due:
+            lines.append(f"{len(due)} reminder(s) due now: " + "; ".join(r["text"][:60] for r in due[:3]))
+        open_tasks = self.list_tasks(include_done=False)
+        if open_tasks:
+            lines.append(f"{len(open_tasks)} open task(s): " + "; ".join(t["title"][:40] for t in open_tasks[:3]))
+        recent = self.recent_turns(3)
+        if recent:
+            lines.append("Last conversation: " + " / ".join(r["text"][:40] for r in recent))
+        return "\n".join(lines) if lines else "Nothing pending. Ready when you are."
+
+    # ---- retention --------------------------------------------------------------
+    def purge_expired(self) -> int:
+        if self.retention_days == 0:
+            count = len(self._query("SELECT id FROM turns"))
+            self.clear_conversation()
+            return count
+        cutoff = time.time() - self.retention_days * 86400
+        cur = self._exec("DELETE FROM turns WHERE ts < ?", (cutoff,))
+        self._exec("DELETE FROM summaries WHERE ts < ?", (cutoff,))
+        return cur.rowcount
+
+    def clear_conversation(self) -> None:
+        self._exec("DELETE FROM turns", ())
+        self._exec("DELETE FROM summaries", ())
+        self._exec("VACUUM", ())
+
+    def clear_memory(self) -> None:
+        """Forget conversation, facts and document index; preserve tool grants and notes."""
+        with self._lock, self._conn:
+            for table in ("turns", "summaries", "facts", "doc_chunks"):
+                self._conn.execute(f"DELETE FROM {table}")
+            self._conn.execute("DELETE FROM meta WHERE key='index_updated'")
+        self._exec("VACUUM")
+
+    def clear_all(self) -> None:
+        for table in ("turns", "summaries", "facts", "doc_chunks", "permissions"):
+            self._exec(f"DELETE FROM {table}", ())  # noqa: S608 - fixed table list
+        self._exec("VACUUM", ())
+
+    def stats(self) -> dict[str, int]:
+        out: dict[str, int] = {"bytes": self.path.stat().st_size if self.path.exists() else 0}
+        for table in ("turns", "summaries", "facts", "doc_chunks"):
+            with suppress(sqlite3.Error):
+                out[table] = int(self._query(f"SELECT COUNT(*) AS c FROM {table}")[0]["c"])  # noqa: S608
+        return out
+
+
+def _next_due(due: float, recurring: str) -> float:
+    """Advance a timestamp by one recurring period (daily/weekly/monthly)."""
+    dt = datetime.fromtimestamp(due)
+    if recurring == "daily":
+        return (dt + timedelta(days=1)).timestamp()
+    if recurring == "weekly":
+        return (dt + timedelta(weeks=1)).timestamp()
+    if recurring == "monthly":
+        if dt.month == 12:
+            return dt.replace(year=dt.year + 1, month=1).timestamp()
+        return dt.replace(month=dt.month + 1).timestamp()
+    return due
