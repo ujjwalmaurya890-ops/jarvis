@@ -484,6 +484,25 @@ def register_system_tools(reg: ToolRegistry, ctx: ToolContext) -> None:
         text = ", ".join(str(p) for p in parts) or "No readings available."
         return ToolResult(True, speech=f"{text}.", display=f"{text}\n{info.get('system','')} / Python {info.get('python','')}", data=dict(info))
 
+    @reg.tool("monitor_status", "Report memory pressure, disk space and whether low-memory mode is active.", Capability.FS_READ, {})
+    def monitor_status() -> ToolResult:
+        from tools.system_monitor import system_snapshot
+
+        snap = system_snapshot()
+        mem = snap.get("memory", {})
+        low = bool(snap.get("low_memory"))
+        speech = f"{mem.get('ram_available_mb', 0)} MB RAM free" + (" - low-memory mode is active." if low else ".")
+        return ToolResult(True, speech=speech, display=str(snap), data=snap)
+
+    @reg.tool("service_status", "Check whether a Windows service is running.", Capability.FS_READ, {"name": str})
+    def service_status_tool(name: str) -> ToolResult:
+        from tools.system_monitor import service_status
+
+        result = service_status(str(name))
+        if not result.get("supported"):
+            return ToolResult.say(str(result.get("status", "Not supported.")))
+        return ToolResult(True, speech=f"{result['service']} is {result['status']}.", data=result)
+
     @reg.tool(
         "system_power",
         "Shut down or restart Windows. Always schedules with a delay so it can be cancelled.",
