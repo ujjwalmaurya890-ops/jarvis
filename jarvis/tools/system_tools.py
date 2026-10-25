@@ -429,6 +429,47 @@ def register_system_tools(reg: ToolRegistry, ctx: ToolContext) -> None:
             data={"text": context, "citations": citations},
         )
 
+    @reg.tool("research_report", "Search the web and save a Markdown report with source links.", Capability.NET_SEARCH, {"query": str})
+    def research_report(query: str) -> ToolResult:
+        from tools.research import format_report, save_report
+        from tools.web_search import extract_text, search_web
+
+        clean = sanitise_query(str(query))
+        if not clean:
+            return ToolResult.fail("Your research request had no usable words.")
+        outcome = search_web(
+            clean,
+            max_results=settings.search.max_results,
+            timeout=settings.search.request_timeout,
+            engine=settings.search.engine,
+            extract_chars=settings.search.extract_chars,
+        )
+        if not outcome.hits:
+            if outcome.fallback_url:
+                return ToolResult.say("No results to compile; opened the search in your browser.")
+            return ToolResult.fail(outcome.error or "No results for that query.")
+        extra = ""
+        top = outcome.hits[0]
+        try:
+            extra = extract_text(
+                top.url,
+                limit=settings.search.extract_chars,
+                timeout=settings.search.request_timeout,
+                allowed_sites=settings.automation.allowed_sites,
+            )[:1500]
+        except Exception:
+            extra = ""  # the summary is best-effort; sources are always included
+        report = format_report(clean, outcome.hits, extra)
+        workspace = getattr(ctx.files, "workspace", None) or WORKSPACE_DIR
+        path = save_report(workspace, clean, report)
+        return ToolResult(
+            True,
+            speech=f"Research saved to {path.name}.",
+            display=report,
+            sources=[hit.as_dict() for hit in outcome.hits],
+            data={"path": str(path), "report": report},
+        )
+
     # --------------------------------------------------------------- system --
     @reg.tool("system_stats", "Report RAM, CPU, disk and platform of this machine.", Capability.FS_READ, {})
     def system_stats() -> ToolResult:
