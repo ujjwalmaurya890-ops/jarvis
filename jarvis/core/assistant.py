@@ -696,6 +696,40 @@ class Jarvis:
         self.state.set_state(State.IDLE, "interrupted")
         self._emit("interrupted")
 
+    # ---- voice controls ------------------------------------------------------
+    def set_muted(self, muted: bool) -> None:
+        """Turn voice output on/off. Muting also stops speech in progress."""
+        self.muted = bool(muted)
+        if self.muted and self.tts is not None:
+            self.tts.stop()
+
+    def push_to_talk(self, source: str = "push-to-talk") -> bool:
+        """Wake the ear if needed and start capturing one utterance.
+
+        This is the push-to-talk fallback: it works with clap detection turned
+        off and with no wake-word model, as long as the microphone is open.
+        """
+        if self.mic is None:
+            self.state.fail("No microphone. Start the ear or use typed input.")
+            return False
+        if not self.mic.is_running:
+            if not self.start_listening():
+                return False
+        return self.trigger(source)
+
+    def voice_status(self) -> dict[str, object]:
+        """A small snapshot of the voice subsystem for the UI and tests."""
+        return {
+            "state": self.state.state.value,
+            "mic_running": bool(self.mic and getattr(self.mic, "is_running", False)),
+            "muted": bool(self.muted),
+            "clap_enabled": bool(self.clap and getattr(self.clap, "enabled", False)),
+            "wake_mode": getattr(self.wake, "mode", "none") if self.wake else "none",
+            "wake_available": bool(self.wake and getattr(self.wake, "available", False)),
+            "tts_available": bool(self.tts and getattr(self.tts, "available", False)),
+            "stt_ready": bool(self.stt and getattr(self.stt, "ready", False)),
+        }
+
     def submit_text(self, text: str) -> str:
         return self.handle_text(text, spoken=self.tts is not None)
 

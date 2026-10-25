@@ -335,11 +335,9 @@ class MainWindow(QMainWindow):
     def push_to_talk(self) -> None:
         if self.assistant is None or self._closing:
             return
+
         def activate() -> None:
-            if not self.assistant.mic or not self.assistant.mic.is_running:
-                if not self.assistant.start_listening():
-                    return
-            self.assistant.trigger("button")
+            self.assistant.push_to_talk("button")
 
         self._executor.submit(activate)
 
@@ -350,7 +348,7 @@ class MainWindow(QMainWindow):
 
     def toggle_mute(self, checked: bool) -> None:
         if self.assistant is not None:
-            self.assistant.muted = checked
+            self.assistant.set_muted(checked)
         self.mute_btn.setText("VOICE MUTED" if checked else "VOICE ON")
 
     def send_text(self) -> None:
