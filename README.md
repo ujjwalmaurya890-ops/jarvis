@@ -5,6 +5,35 @@ its React/Vite dashboard in the repository root. The dashboard starts in a
 browser-only demo. It talks to Python only after you start the authenticated
 loopback API and paste its temporary token into the connection panel.
 
+## Features
+
+Ten independently testable feature groups, implemented in small stages:
+
+1. **Voice system** - wake-word / clap activation, push-to-talk fallback,
+   barge-in interruption, mute, configurable voice output, mic status.
+2. **Document knowledge base** - import PDF/text, chunk + index locally, answer
+   with source filename and page number.
+3. **Productivity** - SQLite reminders and recurring tasks, task dashboard,
+   startup summary.
+4. **Windows tools** - launch approved apps, search permitted folders, media
+   keys, safe file deletes (recycle folder).
+5. **Research mode** - web search, safe page extraction, Markdown report with
+   source links.
+6. **System monitoring** - CPU/RAM/disk/service/model status, low-memory mode
+   for 8 GB.
+7. **Plugin architecture** - approved-plugin registry with manifests, schemas,
+   permissions, error containment, enable/disable.
+8. **Memory & privacy** - inspect/export/delete memory; cloud AI is opt-in and
+   always needs explicit consent.
+9. **UI** - PySide6 desktop + React dashboard with listening/thinking/speaking/
+   error states.
+10. **Reliability & security** - input validation, loopback-only API with token
+    + rate limit, browser-destination allow-list, no arbitrary shell, secrets
+    filtered from logs and kept out of source control.
+
+220 Python tests pass in the Linux sandbox; see `jarvis/docs/VERIFICATION.md`
+for the hardware-only items that still need a real laptop.
+
 ## Prerequisites (Windows PowerShell)
 
 Run these once in a normal PowerShell window. If winget is unavailable, use

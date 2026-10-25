@@ -18,14 +18,18 @@ $ python3 -m compileall -q .
 exit 0; 42 Python files
 ```
 
-## 2. Python tests (111)
+## 2. Python tests (220)
 
 ```
 $ python3 -m pytest -q
-........................................................................ [ 64%]
-.......................................                                  [100%]
-111 passed in 6.27s
+........................................................................ [ 32%]
+........................................................................ [ 65%]
+........................................................................ [ 98%]
+....                                                                     [100%]
+220 passed in 6.41s
 ```
+
+The table below lists the original files; the stage-added files follow it.
 
 | file | covers | result |
 | --- | --- | --- |
@@ -40,6 +44,24 @@ $ python3 -m pytest -q
 | `tests/test_network_security.py` | mocked DNS, redirect and browser SSRF controls | 20 passed |
 | `tests/test_startup_providers.py` | mocked Ollama/Gemini errors and config validation | 7 passed |
 | `tests/test_startup_security_regressions.py` | command completion, denied actions and repeat confirmations | 4 passed |
+
+Stage-added files (reliability, docs, voice, productivity, Windows tools, research, monitoring, plugins, memory, UI, security):
+
+| file | covers | result |
+| --- | --- | --- |
+| `tests/test_input_validation.py` | control-char stripping, length caps, LIKE escaping, safe filenames | passed |
+| `tests/test_secrets_log_filter.py` | credentials redacted from every log record | passed |
+| `tests/test_local_api.py` (updated) | origin/host rebinding blocked, token auth, rate-limit burst | 6 passed |
+| `tests/test_document_knowledge.py` | PDF/text load, chunk+index, page citations, import sandbox | 12 passed |
+| `tests/test_voice_controls.py` | push-to-talk, mute, interrupt, voice_status, clap-off | 7 passed |
+| `tests/test_productivity.py` | reminder/task lifecycle, recurring roll-forward, dashboard, startup summary | 11 passed |
+| `tests/test_windows_tools.py` | media keys, soft/permanent delete, directory refusal, routing | 12 passed |
+| `tests/test_research.py` | Markdown report building, export, no-hit fallback | 5 passed |
+| `tests/test_system_monitor.py` | memory/disk/service/model status, low-memory guard | 10 passed |
+| `tests/test_plugins.py` | manifest validation, registry, permissions, crash containment, boot | 16 passed |
+| `tests/test_memory_privacy.py` | inspect/export/delete memory, cloud consent | 10 passed |
+| `tests/test_ui_states.py` | Qt-free UI state metadata | 4 passed |
+| `tests/test_security_final.py` | shell allowlist, secrets in VCS, loopback-only API | 9 passed |
 
 ### Bugs the tests actually caught (and the fixes)
 
