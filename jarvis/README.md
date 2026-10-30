@@ -2,7 +2,7 @@
 
 A modular, free, offline-capable desktop assistant for a laptop with **8 GB RAM, an i5/Ryzen 5 and no
 dedicated GPU**. It listens for a clap pattern or a wake phrase, transcribes speech locally with
-Faster-Whisper, thinks with a local Ollama model (optional free-tier Gemini fallback), researches on the
+Faster-Whisper, thinks with a local Ollama model (optional explicitly selected Gemini provider), researches on the
 web, and performs *allow-listed* actions on Windows.
 
 > **Honesty note.** This repository was written and verified in a Linux CI sandbox: all 111 Python tests
@@ -35,7 +35,7 @@ web, and performs *allow-listed* actions on Windows.
         └─> CommandRecorder (energy VAD) ─> SpeechToText (Faster-Whisper)
               └─> Router:  control words -> regex tools -> model JSON/tools -> fallback
                     ├─> ToolRegistry -> PermissionBroker (default-deny) -> handlers
-                    ├─> ProviderChain: Ollama -> Gemini -> (error, never a crash)
+                    ├─> ProviderChain: local only, or explicitly selected Gemini -> Ollama
                     └─> TextToSpeech (interruptible)
                          SQLite memory: turns, summaries, facts, permissions, doc index
 ```

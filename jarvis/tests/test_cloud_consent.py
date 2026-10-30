@@ -78,3 +78,17 @@ def test_private_document_summarization_uses_ollama_only(tmp_path):
         assert not cloud.calls and len(local.calls) == 1
     finally:
         jarvis.shutdown()
+
+def test_failed_local_request_never_falls_through_to_cloud():
+    from core.assistant import ProviderChain
+
+    class Unavailable(Provider):
+        def complete(self, messages, **kwargs):
+            self.calls.append(messages)
+            return Completion(error="local unavailable", provider=self.name)
+
+    local = Unavailable("ollama", "")
+    cloud = Provider("gemini", "cloud")
+    result = ProviderChain([local, cloud]).complete([{"role": "user", "content": "hello"}])
+    assert not result.ok and "explicitly select Gemini" in result.error
+    assert not cloud.calls

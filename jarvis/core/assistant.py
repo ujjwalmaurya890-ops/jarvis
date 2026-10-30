@@ -51,7 +51,15 @@ class ProviderChain:
 
     def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> Completion:
         errors: list[str] = []
+        local_attempted = False
         for provider in self.providers:
+            # A previously granted cloud permission must not turn a failed local
+            # request into an unexpected upload. Cloud must be selected first.
+            if provider.name == "gemini" and local_attempted:
+                errors.append("Cloud fallback disabled; explicitly select Gemini to use cloud AI.")
+                continue
+            if provider.name == "ollama":
+                local_attempted = True
             try:
                 result = provider.complete(messages, **kwargs)  # type: ignore[call-arg]
             except Exception as exc:

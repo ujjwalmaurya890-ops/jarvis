@@ -101,3 +101,17 @@ def test_command_burst_is_rate_limited(tmp_path):
         assert all(code == 429 for code in codes[20:])
         # The burst beyond the limit must not have been executed.
         assert len(assistant.commands) == 20
+
+def test_non_ascii_token_is_rejected(tmp_path):
+    with running_api(tmp_path) as (server, _):
+        assert send(server, "GET", "/api/session", token="é" )[0] == 401
+
+
+def test_subscription_failure_does_not_leak_command_gate(tmp_path):
+    with running_api(tmp_path) as (server, assistant):
+        def fail(_handler):
+            raise RuntimeError("subscription failed")
+        assistant.on_event = fail
+        assert send(server, "POST", "/api/command", token=server.token, body={"text": "help"})[0] == 500
+        del assistant.on_event
+        assert send(server, "POST", "/api/command", token=server.token, body={"text": "help"})[0] == 200

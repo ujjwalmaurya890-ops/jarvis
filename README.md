@@ -31,7 +31,7 @@ Ten independently testable feature groups, implemented in small stages:
     + rate limit, browser-destination allow-list, no arbitrary shell, secrets
     filtered from logs and kept out of source control.
 
-220 Python tests pass in the Linux sandbox; see `jarvis/docs/VERIFICATION.md`
+For the latest test results, run the commands below; see `jarvis/docs/VERIFICATION.md`
 for the hardware-only items that still need a real laptop.
 
 ## Prerequisites (Windows PowerShell)
@@ -135,3 +135,40 @@ lockfile is not a fix.
 For Python permissions, model downloads, voice setup and full configuration,
 see `jarvis/README.md`. Actual executed checks and hardware-only checks are in
 `jarvis/docs/VERIFICATION.md`.
+## Incremental security update and current scope
+
+The Python API exposes typed commands and health only; it does not control the
+desktop microphone, stream or cancel generation, or approve sensitive actions.
+The browser voice demo is separate and browser speech recognition may send audio
+to its vendor. Provider status in the dashboard reflects the API startup probe,
+not a live model check.
+
+`auto` now remains local on an Ollama failure, even if cloud permission was
+previously granted. To use Gemini, explicitly select `gemini` in the desktop
+settings, set `GEMINI_API_KEY` and `ALLOW_CLOUD=1` in `jarvis/.env`, and approve
+the cloud capability in the desktop UI. Gemini-first requests may fall back to
+Ollama. Never put the key in the dashboard.
+
+Optional setup helper (PowerShell, no administrator privileges):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+```
+
+This uses a process-only execution policy and installs the existing pinned
+dependencies; it does not download models. Review the script before running it.
+Download a model explicitly with `ollama pull qwen2.5:1.5b`, then run
+`& .\jarvis\.venv\Scripts\python.exe .\jarvis\main.py --check`.
+Actual Windows setup, hardware, cloud and packaging remain unverified here.
+
+Folder indexing now rejects file links resolving outside selected roots, but
+this is not a race-free sandbox against another local process changing links
+while scanning; select only trusted folders. Local same-user processes and
+Windows project-folder ACLs remain part of the token security boundary.
+
+Security note: a previously tracked source archive contained a runtime API token
+and log; those files have been removed from the current archive. API tokens are
+regenerated on each API start. Stop and restart any older running API instance;
+review and sanitize the exposed log and Git history before sharing the project.
+The archive is a historical snapshot, not the current release; use the checked-out
+source for these fixes. A pattern scan is not proof that no other secrets exist.

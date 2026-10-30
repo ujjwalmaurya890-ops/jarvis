@@ -99,7 +99,10 @@ class LocalAPIHandler(BaseHTTPRequestHandler):
         bearer = self.headers.get("Authorization", "")
         if not bearer.startswith("Bearer "):
             return False
-        return hmac.compare_digest(bearer[7:], self.server.token)
+        try:
+            return hmac.compare_digest(bearer[7:], self.server.token)
+        except TypeError:  # Non-ASCII header values are never valid tokens.
+            return False
 
     def _respond(self, status: int, data: dict[str, Any] | None = None) -> None:
         body = b"" if data is None else json.dumps(data, ensure_ascii=True).encode("utf-8")
@@ -186,15 +189,18 @@ class LocalAPIHandler(BaseHTTPRequestHandler):
                 return
             metadata: dict[str, Any] = {}
             assistant = self.server.assistant
-            unsubscribe = (
-                assistant.on_event(lambda event, data: metadata.update(data) if event == "reply" else None)
-                if hasattr(assistant, "on_event") else lambda: None
-            )
+            unsubscribe = lambda: None
             try:
+                if hasattr(assistant, "on_event"):
+                    unsubscribe = assistant.on_event(
+                        lambda event, data: metadata.update(data) if event == "reply" else None
+                    )
                 reply = assistant.handle_text(text.strip(), spoken=False)
             finally:
-                unsubscribe()
-                self.server.command_gate.release()
+                try:
+                    unsubscribe()
+                finally:
+                    self.server.command_gate.release()
         except Exception:
             log.exception("Local command failed (input omitted)")
             self._respond(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Command failed. See the local terminal for details."})
