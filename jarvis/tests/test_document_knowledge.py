@@ -222,3 +222,22 @@ def test_old_database_migrates_to_page_column(tmp_path):
     cols = {row[1] for row in db._conn.execute("PRAGMA table_info(doc_chunks)")}
     assert "page" in cols
     db.close()
+
+
+def test_folder_scan_does_not_follow_file_symlink_outside_root(tmp_path):
+    root = tmp_path / "selected"
+    root.mkdir()
+    private = tmp_path / "private.txt"
+    private.write_text("Sensitive information outside selected folder", encoding="utf-8")
+    link = root / "linked.txt"
+    try:
+        link.symlink_to(private)
+    except (OSError, NotImplementedError):
+        pytest.skip("File symlinks unavailable on this platform")
+    db = MemoryDB(tmp_path / "index.db")
+    try:
+        index = DocumentIndex(db)
+        assert index.index_roots([str(root)])["files"] == 0
+        assert index.search("Sensitive information") == []
+    finally:
+        db.close()

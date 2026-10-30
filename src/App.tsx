@@ -24,7 +24,7 @@ const BOOT = [
   "clap.detector ....... band 800-4000 Hz · double · refractory 1.2 s",
   "wake.word ............. requires an actual local model; no custom model shipped",
   "stt ................. faster-whisper tiny.en · int8 · beam 1 · VAD on",
-  "ai.chain .............. ollama:qwen2.5:1.5b -> gemini (opt-in) -> regex",
+  "ai.chain .............. Ollama locally · Gemini only when explicitly selected",
   "tools ............... 14 registered · default-deny broker in front of each",
   "memory .............. sqlite data/jarvis.db · redact() on every write",
   "ui .................. PySide6 · QThreads · 20 fps orb · no blocking GUI",
@@ -130,7 +130,7 @@ export default function App() {
           <div className="lg:col-span-7">
             <div className="flex flex-wrap items-center gap-2 mb-5">
               <Chip tone="lime">
-                <Sparkles size={10} /> 111 PYTHON TESTS PASSING IN THIS SANDBOX
+                <Sparkles size={10} /> LOCAL-FIRST · WINDOWS HARDWARE UNVERIFIED
               </Chip>
               <Chip tone="cyan">₹0 / MONTH</Chip>
               <Chip tone="mut">PYTHON 3.12 · WINDOWS 10/11</Chip>
@@ -153,8 +153,8 @@ export default function App() {
             <div className="mt-7 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <Spec n={String(PROJECT_FILES.length)} label="PROJECT FILES" sub="no monolith file" />
               <Spec n={TOTAL_LINES.toLocaleString()} label="LINES SHIPPED" sub="every one below" />
-              <Spec n="111" label="PYTHON TESTS" sub="run here, hardware pending" />
-              <Spec n="14" label="TOOL CALLS" sub="behind capability gates" />
+              <Spec n="LOCAL" label="PRIVACY" sub="cloud requires permission" />
+              <Spec n="OPT-IN" label="VOICE INPUT" sub="microphone starts off" />
             </div>
 
             <div className="mt-8 flex flex-wrap gap-2.5">
@@ -190,7 +190,7 @@ export default function App() {
           <div className="lg:col-span-5 panel corner p-4 scanlines">
             <div className="flex items-center gap-2 mb-3">
               <span className="w-1.5 h-1.5 rounded-full bg-lime" />
-              <span className="font-mono text-[9.5px] tracking-[0.22em] text-dim">SUBSYSTEM MANIFEST · STAGES 2-8</span>
+              <span className="font-mono text-[9.5px] tracking-[0.22em] text-dim">SUBSYSTEM MANIFEST · NOT A LIVE HEALTH CHECK</span>
             </div>
             <div className="space-y-1.5">
               {BOOT.map((line, i) => (
@@ -200,7 +200,7 @@ export default function App() {
                     i < typed ? "opacity-100 translate-x-0 text-mut" : "opacity-0 translate-x-2"
                   }`}
                 >
-                  <span className="text-cyan/70">ok</span> {line}
+                  <span className="text-cyan/70">•</span> {line}
                 </p>
               ))}
             </div>
@@ -277,7 +277,7 @@ export default function App() {
                 {[
                   "Ship a 'tested on Windows' claim I cannot show output for.",
                   "Give the model a shell, a terminal, or a delete function.",
-                  "Record to the cloud, or send audio anywhere — there is no upload path.",
+                  "Use browser speech recognition without warning: the browser provider may send audio to its service.",
                   "Tell you to disable Defender, or lower a system security policy, to make an install work.",
                   "Promise Iron Man audio from free SAPI5 voices.",
                   "Index your whole disk, or store a password because you happened to dictate one.",
@@ -311,7 +311,7 @@ export default function App() {
                 ["licence", "all deps FOSS"],
                 ["cloud", "optional, off by default"],
                 ["storage", "local SQLite only"],
-                ["tested", "59 pass / hardware pending"],
+                ["hardware", "Windows verification pending"],
               ].map(([k, v]) => (
                 <p key={k}>
                   <span className="text-mut">{k}</span> · {v}

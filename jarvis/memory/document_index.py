@@ -61,6 +61,10 @@ class DocumentIndex:
                 if len(found) >= limit:
                     return found
                 try:
+                    # Never follow a file symlink out of the selected root.
+                    # Resolve again immediately before ingestion below as well.
+                    if not path.resolve().is_relative_to(root):
+                        continue
                     if not path.is_file() or path.suffix.lower() not in INDEXABLE_EXT:
                         continue
                     if path.stat().st_size > self.max_file_bytes or path.stat().st_size < 20:
@@ -126,6 +130,11 @@ class DocumentIndex:
             for i, path in enumerate(files, 1):
                 self.progress = i / max(1, len(files))
                 try:
+                    # A link could have changed since the initial directory scan.
+                    resolved = path.resolve()
+                    if not any(resolved.is_relative_to(Path(root).expanduser().resolve()) for root in roots):
+                        stats["skipped"] += 1
+                        continue
                     mtime = path.stat().st_mtime
                     if not force and str(path) in already_indexed and self.last_scan.get(str(path)) == mtime:
                         stats["skipped"] += 1
